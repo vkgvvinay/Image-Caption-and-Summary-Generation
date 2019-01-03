@@ -1,26 +1,31 @@
 from tensorflow.python.keras.applications import VGG16
 from tensorflow.python.keras.models import Model
-from tensorflow.python.keras.layers import Input, Dense, GRU, Embedding
-from tensorflow.python.keras.optimizers import RMSprop
+from tensorflow.python.keras.layers import Input, Dense, Embedding
+from tensorflow.python.keras.layers.recurrent import GRU
+from tensorflow.python.keras import optimizers
 from tensorflow.python.keras.callbacks import ModelCheckpoint, TensorBoard
+from tensorflow.python.keras import backend as K
 
 from pycocotools.coco import COCO
-# import numpy as np
+import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 from PIL import Image
+import tensorflow as tf
+import math
 
-from dv_utils import *
+from utils import *
 
 
 dataDir='.'
 dataType='train2017'
 
 batch_size = 128
-embedding_size = 128
+embedding_size = 256
 cell_state_size = 512
-num_words = 10000
-epochs = 3
+epoch_start = 0
+epoch_end = 20
+num_words = 15000
 
 capsAnnFile='{}/annotations/captions_{}.json'.format(dataDir,dataType)
 instAnnFile='{}/annotations/instances_{}.json'.format(dataDir,dataType)
@@ -38,18 +43,17 @@ end = ' eenddd'
 
 captions = get_captions(id_list,coco_caps)
 captions_marked = [[str(start)+str(info)+str(end) for info in cap] for cap in captions]
-captions_train = [sent for cap in captions_marked for sent in cap]
+all_caps_train = get_train_captions(captions_marked,cap_all=True)
 
-tokenizer = TokenizerExt(captions_train)
+tokenizer = TokenizerExt(all_caps_train,num_words=num_words,oov_token=num_words+1)
 train_tokens = tokenizer.captions_to_tokens(captions_marked)
 
 num_images = vgg_activations.shape[0]
 id_map = np.array(range(num_images))
 
-steps = int(len(captions_train)/batch_size)
+steps = int(len(all_caps_train)/batch_size)
 activation_vector_length = vgg_activations.shape[1]
 del captions
-del captions_train
 del captions_marked
 del coco_inst
 del coco_caps
@@ -67,19 +71,32 @@ lang_gru3 = GRU(cell_state_size, name='lang_gru3',return_sequences=True)(lang_gr
 
 lang_out = Dense(num_words,activation='linear',name='lang_out')(lang_gru3)
 language_model = Model(inputs=[image_activation_input,lang_model_input],outputs=[lang_out])
+	
 
+def sparse_cross_entropy(y_true, y_pred):
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true,
+                                                          logits=y_pred)
+    loss_mean = tf.reduce_mean(loss)
+    return loss_mean
 
-optimizer = RMSprop()
+optimizer = optimizers.RMSprop()
+decoder_target = tf.placeholder(dtype='int32', shape=(None, None))
 language_model.compile(optimizer=optimizer,
-                      loss='sparse_categorical_crossentropy')
+                      loss=sparse_cross_entropy
+                      ,target_tensors=[decoder_target]
+                      )
 
-path_checkpoint = 'train_checkpoint.keras'
-callback_checkpoint = ModelCheckpoint(filepath=path_checkpoint,verbose=1,save_weights_only=True)
+
+path_checkpoint = 'model_weights.keras'
 callback_tensorboard = TensorBoard(log_dir='./train_logs/',histogram_freq=0,write_graph=False)
-callbacks = [callback_checkpoint, callback_tensorboard]
+callbacks = [callback_tensorboard]
 
-generator = data_generator(id_map, vgg_activations, train_tokens, batch_size)
-language_model.fit_generator(generator,
-                            steps_per_epoch=steps,
-                            epochs=epochs,
-                            callbacks=callbacks)
+for i in range(epoch_start,epoch_end,1):
+    generator = data_generator(train_tokens,id_map,vgg_activations,batch_size=batch_size,single_caption=False)
+    steps = int(len(all_caps_train)/batch_size)
+    language_model.fit_generator(generator,
+                                steps_per_epoch=steps,
+                                epochs=i+1,
+                                callbacks=callbacks,
+                                 initial_epoch = i)
+    language_model.save(path_checkpoint)

@@ -1,6 +1,7 @@
 from tensorflow.python.keras.preprocessing.text import Tokenizer
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
 import numpy as np
+import tensorflow as tf
 
 def getAllIds(coco_inst) :
     cats = coco_inst.loadCats(coco_inst.getCatIds())
@@ -28,11 +29,17 @@ def get_captions(id_list,coco_caps):
     
     return captions
 
+def get_train_captions(captions_marked,i=0,cap_all=False):
+    if cap_all:
+        return [sent for cap in captions_marked for sent in cap]
+    else:
+        return [cap[i] for cap in captions_marked]
+
 
 class TokenizerExt(Tokenizer):
     
-    def __init__(self, texts, num_words=None):
-        Tokenizer.__init__(self, num_words=num_words)
+    def __init__(self, texts, num_words=None,oov_token=0):
+        Tokenizer.__init__(self, num_words=num_words,oov_token=oov_token)
         self.fit_on_texts(texts)
         self.index_to_word = dict(zip(self.word_index.values(),self.word_index.keys()))
 
@@ -47,48 +54,66 @@ class TokenizerExt(Tokenizer):
         return text
     
     def captions_to_tokens(self, captions_list):
-        tokens = [self.texts_to_sequences(captions) for captions in captions_list]
-        
+        if len(captions_list[0])<6:
+            tokens = [self.texts_to_sequences(captions) for captions in captions_list]
+        else :
+            tokens = self.texts_to_sequences(captions_list)
         return tokens
 
 
-def get_tokens(ids,train_tokens):
+def get_tokens(train_tokens,ids,single_caption=False):
     results = []
-    for idx in ids:
-        num_captions = len(train_tokens[idx])
-        rand = np.random.choice(num_captions)
-        cap_tokens = train_tokens[idx][rand]
-        results.append(cap_tokens)
+    if single_caption:
+        for idx in ids:
+            rand = np.random.choice(ids)
+            cap_tokens = train_tokens[idx]
+            results.append(cap_tokens)
+    else :
+        for idx in ids:
+            num_captions = len(train_tokens[idx])
+            rand = np.random.choice(num_captions)
+            cap_tokens = train_tokens[idx][rand]
+            results.append(cap_tokens)
 
     return results
 
 
-def data_generator(id_map, vgg_activations,train_tokens, batch_size = 32):
-#     np.random.shuffle(id_map)
+def data_generator(train_tokens,id_map,vgg_activations,batch_size = 32, single_caption = False):
+    np.random.shuffle(id_map)
     
     index = 0
+    num_images = vgg_activations.shape[0]
     while True:
+        if index>=num_images or num_images-index<batch_size:
+            index = 0
+            continue
         ids = id_map[index:index+batch_size]
         index = index+batch_size
         
         image_model_activations = vgg_activations[ids]
         
-        cap_tokens = get_tokens(ids,train_tokens)
-        num_tokens = [len(t) for t in cap_tokens]
+        # if not single_caption:
+        #     cap_tokens = get_tokens(train_tokens,ids)
         
+        # else :
+        #     cap_tokens = get_tokens(train_tokens,ids,single_caption=True)
+        
+        cap_tokens = get_tokens(train_tokens,ids,single_caption=single_caption)
+
+        num_tokens = [len(t) for t in cap_tokens]
         max_tokens = np.max(num_tokens)
         
         tokens_padded = pad_sequences(cap_tokens,
                                       maxlen=max_tokens,
                                       padding='post',
                                       truncating='post')
-        if len(tokens_padded)==0:
-            print('Length of tokens is 0')
-            continue
+
         x_data = [np.array(image_model_activations),np.array(tokens_padded[:,:-1])]
-        y_data = np.expand_dims(tokens_padded[:,1:],axis=-1)
+#         y_data = np.expand_dims(tokens_padded[:,1:],axis=-1)
+        y_data = tokens_padded[:,1:]
         
         yield (x_data,y_data)
+
 
 
 def load_image(path,size=(224,224,)):

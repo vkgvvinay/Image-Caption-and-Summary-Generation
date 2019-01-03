@@ -28,5 +28,9 @@ This generates a file containing all the activations.
 
 Then to train the model run -
 ``` python
-python final_model_train.py
+python train.py
+```
+To generate captions run - 
+``` python
+python generate_caption.py
 ```
