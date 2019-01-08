@@ -21,16 +21,16 @@ We have also used Python API for using coco dataset. Please install by following
 To save the training time the activations from image model is generated pre hand because we are using trained model as an image model and not meddling with the weights of the model.
 
 So after cloning the project run -
-``` python
+```python
 python image_model_activations.py
 ```
 This generates a file containing all the activations.
 
 Then to train the model run -
-``` python
+```python
 python train.py
 ```
 To generate captions run - 
-``` python
+```python
 python generate_caption.py
 ```
